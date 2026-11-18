@@ -1,6 +1,7 @@
 //! TastyWaves : plugin VST3 et CLAP du synthé à tables d'ondes du firmware de marksweiss/tastywaves.
 
 pub mod core;
+mod params;
 mod rate;
 
 use nih_plug::prelude::*;
@@ -8,15 +9,14 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use crate::core::{Noyau, BLOC, FS};
+use crate::params::{de_hex, en_hex, Parametres};
 use crate::rate::Rateur;
 
 const MAX_MIDI: usize = 64; // la file MIDI du firmware tient 64 messages par bloc
 
-#[derive(Params)]
-struct Parametres {}
-
 pub struct TastyWaves {
     params: Arc<Parametres>,
+    envoyes: [i32; Parametres::N], // dernière valeur de chaque paramètre transmise au firmware
     noyau: Option<Noyau>,
     rateur: Rateur,
     en_attente: [[u8; 3]; MAX_MIDI],
@@ -25,7 +25,53 @@ pub struct TastyWaves {
 
 impl Default for TastyWaves {
     fn default() -> Self {
-        Self { params: Arc::new(Parametres {}), noyau: None, rateur: Rateur::new(FS), en_attente: [[0; 3]; MAX_MIDI], nb_attente: 0 }
+        Self { params: Arc::new(Parametres::default()), envoyes: valeurs_defaut(), noyau: None, rateur: Rateur::new(FS), en_attente: [[0; 3]; MAX_MIDI], nb_attente: 0 }
+    }
+}
+
+fn valeurs_defaut() -> [i32; Parametres::N] {
+    let p = Parametres::default();
+    let mut v = [0; Parametres::N];
+    for (i, (_, par, _)) in p.liste().iter().enumerate() {
+        v[i] = par.default_plain_value();
+    }
+    v
+}
+
+impl TastyWaves {
+    /// Un noyau neuf, avec les réglages et patchs du projet s'il y en a.
+    fn nouveau_noyau(&mut self) -> Result<Noyau, String> {
+        let mut n = Noyau::nouveau()?;
+        if let Some(d) = de_hex(&self.params.keep.read().unwrap()) {
+            if !d.is_empty() && !n.importer(&d) {
+                nih_warn!("TastyWaves : état d'une autre version du firmware, ignoré");
+            }
+        }
+        self.envoyes = valeurs_defaut(); // le firmware repart de ses défauts : tout écart sera retransmis
+        Ok(n)
+    }
+
+    /// Met dans l'état du projet ce que le firmware vient d'écrire (réglages, patchs).
+    fn garder(&mut self) {
+        let Some(n) = self.noyau.as_mut() else { return };
+        if n.modifie() {
+            if let Ok(mut k) = self.params.keep.try_write() {
+                *k = en_hex(&n.exporter());
+            }
+        }
+    }
+
+    /// Les paramètres changés depuis le dernier bloc partent en contrôleurs MIDI.
+    fn envoyer_parametres(&mut self) {
+        for (i, (cc, par, min)) in self.params.liste().iter().enumerate() {
+            let v = par.value();
+            if v != self.envoyes[i] && self.nb_attente < MAX_MIDI - 8 {
+                let x = if *min < 0 { v - *min } else { v }; // un paramètre signé part décalé (0..127)
+                self.en_attente[self.nb_attente] = [0xB0, *cc, x as u8];
+                self.nb_attente += 1;
+                self.envoyes[i] = v;
+            }
+        }
     }
 }
 
@@ -70,7 +116,7 @@ impl Plugin for TastyWaves {
     }
 
     fn initialize(&mut self, _: &AudioIOLayout, cfg: &BufferConfig, ctx: &mut impl InitContext<Self>) -> bool {
-        match Noyau::nouveau() {
+        match self.nouveau_noyau() {
             Ok(n) => self.noyau = Some(n),
             Err(e) => {
                 nih_error!("TastyWaves : {e}");
@@ -87,7 +133,7 @@ impl Plugin for TastyWaves {
     fn reset(&mut self) {
         // le firmware n'a pas de remise à zéro : on repart d'une nouvelle instance
         if self.noyau.is_some() {
-            self.noyau = Noyau::nouveau().ok();
+            self.noyau = self.nouveau_noyau().ok();
         }
         self.rateur.reset();
         self.nb_attente = 0;
@@ -98,7 +144,12 @@ impl Plugin for TastyWaves {
     }
 
     fn process(&mut self, buffer: &mut Buffer, _: &mut AuxiliaryBuffers, ctx: &mut impl ProcessContext<Self>) -> ProcessStatus {
-        let Some(noyau) = self.noyau.as_mut() else { return ProcessStatus::Normal };
+        if self.noyau.is_none() {
+            return ProcessStatus::Normal;
+        }
+        self.garder();
+        self.envoyer_parametres();
+        let noyau = self.noyau.as_mut().unwrap();
         let mut evt = ctx.next_event();
         for (s, trame) in buffer.iter_samples().enumerate() {
             // les messages arrivés jusqu'ici partent au prochain bloc du firmware (précision : 5,8 ms)
