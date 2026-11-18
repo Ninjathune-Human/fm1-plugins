@@ -1,0 +1,39 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write      # pour déplacer le tag deploye
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fichiers du site
+        run: mkdir _site && cp index.html _site/ && cp -r assets _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+      # le tag deploye sur le commit publié : ce qui est en ligne se lit dans le dépôt
+      - name: Tag deploye
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/deploye" -f sha="$GITHUB_SHA" -F force=true \
+            || gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/deploye -f sha="$GITHUB_SHA"
