@@ -1,0 +1,14 @@
+[package]
+name = "tastywaves"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "TastyWaves : synthé à tables d'ondes à 12 voix, tiré d'un firmware FM-1 open source"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", rev = "de421011f41a6d10fc8c7a6084e4f4dee0143683", default-features = false, features = ["vst3"] }
+libloading = "0.8"

@@ -2,11 +2,10 @@
 
 Le firmware de TastyWaves est compilé tel quel en bibliothèque dynamique pour PC, avec un `emscripten.h` de remplacement (`../core/shim`) et une coroutine à temps virtuel (`../core/runtime.c`). `drive.c` charge une copie de la bibliothèque par instance et joue une note.
 
-Reproduire (Linux) : sources du firmware dans `$TW` (commit 12d3499), puis
+Reproduire (Linux) : sources du firmware dans `tastywaves/vendor` (commit 12d3499), puis
 
-    cp tastywaves/core/host.c $TW/tests/host.c
     gcc -O2 -shared -fPIC -w -DDINGHY_HOST '-DAPP_VER="1.0"' -DDH_CV_ROWS=64u -Itastywaves/core/shim \
-        -I$TW/firmware/src -I$TW/firmware/gen $TW/firmware/src/tastywaves.c tastywaves/core/runtime.c -o tastywaves.so
+        -Itastywaves/vendor/firmware/src -Itastywaves/vendor/firmware/gen tastywaves/vendor/firmware/src/tastywaves.c tastywaves/core/runtime.c -o tastywaves.so
     gcc -O2 tastywaves/spike/drive.c -ldl -o drive
     ./drive tastywaves.so 60 64          # deux instances, deux notes
 

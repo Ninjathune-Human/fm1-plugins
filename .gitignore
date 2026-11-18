@@ -2,3 +2,4 @@ tastywaves/spike/drive
 *.so
 *.raw
 _banc/
+target/

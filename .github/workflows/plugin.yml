@@ -1,0 +1,29 @@
+name: Plugin
+
+on:
+  push:
+    paths: ['tastywaves/**', 'Cargo.toml', 'Cargo.lock', 'xtask/**', '.github/workflows/plugin.yml']
+  workflow_dispatch:
+
+jobs:
+  construire:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Tests (son identique au banc, instances isolées)
+        run: cargo test -p tastywaves --release
+      - name: Paquets VST3 et CLAP
+        run: cargo xtask bundle tastywaves --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tastywaves-${{ matrix.os }}
+          path: target/bundled/*
