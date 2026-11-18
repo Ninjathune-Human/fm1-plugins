@@ -17,6 +17,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      - name: Bibliothèques graphiques (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libx11-xcb-dev libxcb1-dev libxcb-icccm4-dev libxcb-dri2-0-dev libxcb-xfixes0-dev libxcb-shape0-dev libxcb-render0-dev libxcb-glx0-dev libxcursor-dev libxrandr-dev libxi-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Tests (son identique au banc, instances isolées)

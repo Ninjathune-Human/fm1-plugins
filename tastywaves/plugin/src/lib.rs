@@ -1,6 +1,7 @@
 //! TastyWaves : plugin VST3 et CLAP du synthé à tables d'ondes du firmware de marksweiss/tastywaves.
 
 pub mod core;
+mod gui;
 mod params;
 mod rate;
 
@@ -9,6 +10,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use crate::core::{Noyau, BLOC, FS};
+use crate::gui::{partage, Geste, Partage};
 use crate::params::{de_hex, en_hex, Parametres};
 use crate::rate::Rateur;
 
@@ -18,6 +20,8 @@ pub struct TastyWaves {
     params: Arc<Parametres>,
     envoyes: [i32; Parametres::N], // dernière valeur de chaque paramètre transmise au firmware
     noyau: Option<Noyau>,
+    partage: Partage,
+    blocs: u32,
     rateur: Rateur,
     en_attente: [[u8; 3]; MAX_MIDI],
     nb_attente: usize,
@@ -25,7 +29,7 @@ pub struct TastyWaves {
 
 impl Default for TastyWaves {
     fn default() -> Self {
-        Self { params: Arc::new(Parametres::default()), envoyes: valeurs_defaut(), noyau: None, rateur: Rateur::new(FS), en_attente: [[0; 3]; MAX_MIDI], nb_attente: 0 }
+        Self { params: Arc::new(Parametres::default()), envoyes: valeurs_defaut(), noyau: None, partage: partage(), blocs: 0, rateur: Rateur::new(FS), en_attente: [[0; 3]; MAX_MIDI], nb_attente: 0 }
     }
 }
 
@@ -115,6 +119,10 @@ impl Plugin for TastyWaves {
         self.params.clone()
     }
 
+    fn editor(&mut self, _: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        crate::gui::editeur(self.params.fenetre.clone(), self.partage.clone())
+    }
+
     fn initialize(&mut self, _: &AudioIOLayout, cfg: &BufferConfig, ctx: &mut impl InitContext<Self>) -> bool {
         match self.nouveau_noyau() {
             Ok(n) => self.noyau = Some(n),
@@ -166,10 +174,27 @@ impl Plugin for TastyWaves {
                 evt = ctx.next_event();
             }
             let (g, d) = self.rateur.suivant(|| {
+                // les gestes de la fenêtre, puis l'écran rendu en retour (un bloc sur quatre : environ 43 images par seconde)
+                if let Ok(mut e) = self.partage.try_lock() {
+                    for g in e.gestes.drain(..) {
+                        match g {
+                            Geste::Bouton(i, bas) => noyau.bouton(i, bas),
+                            Geste::Encodeur(i, n) => noyau.encodeur(i, n),
+                        }
+                    }
+                }
                 for m in &self.en_attente[..self.nb_attente] {
                     noyau.midi(m[0], m[1], m[2]);
                 }
                 self.nb_attente = 0;
+                self.blocs = self.blocs.wrapping_add(1);
+                if self.blocs % 4 == 0 {
+                    if let Ok(mut e) = self.partage.try_lock() {
+                        e.ecran.copy_from_slice(noyau.ecran());
+                        e.temoins = noyau.temoins();
+                        e.neuf = true;
+                    }
+                }
                 noyau.bloc()
             });
             let mut canaux = trame.into_iter();

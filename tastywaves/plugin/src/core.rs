@@ -18,6 +18,13 @@ type Midi = unsafe extern "C" fn(u32, u32, u32);
 type Store = unsafe extern "C" fn() -> *mut u8;
 type StoreN = unsafe extern "C" fn() -> u32;
 type Dirty = unsafe extern "C" fn() -> u32;
+type Fb = unsafe extern "C" fn() -> *const u16;
+type Leds = unsafe extern "C" fn() -> *const u8;
+type Btn = unsafe extern "C" fn(u32, u32);
+type Enc = unsafe extern "C" fn(u32, i32);
+
+/// Taille de l'écran du firmware, en pixels.
+pub const ECRAN: usize = 240;
 
 pub struct Noyau {
     avance: Avance,
@@ -26,6 +33,10 @@ pub struct Noyau {
     store: Store,
     store_n: StoreN,
     dirty: Dirty,
+    fb: Fb,
+    leds: Leds,
+    btn: Btn,
+    enc: Enc,
     lib: Option<Library>, // gardée tant que les pointeurs de fonction servent ; déchargée dans Drop
     chemin: PathBuf,
 }
@@ -37,18 +48,22 @@ impl Noyau {
         let chemin = std::env::temp_dir().join(format!("tastywaves-{}-{n}.{ext}", std::process::id()));
         fs::write(&chemin, NOYAU).map_err(|e| format!("écriture de {}: {e}", chemin.display()))?;
         let lib = unsafe { Library::new(&chemin) }.map_err(|e| format!("chargement du noyau: {e}"))?;
-        let (avance, audio, midi, store, store_n, dirty) = unsafe {
+        let (avance, audio, midi, store, store_n, dirty, fb, leds, btn, enc) = unsafe {
             let a: Symbol<Avance> = lib.get(b"tw_advance\0").map_err(|e| e.to_string())?;
             let b: Symbol<Audio> = lib.get(b"web_audio\0").map_err(|e| e.to_string())?;
             let c: Symbol<Midi> = lib.get(b"web_midi\0").map_err(|e| e.to_string())?;
             let d: Symbol<Store> = lib.get(b"web_store\0").map_err(|e| e.to_string())?;
             let e: Symbol<StoreN> = lib.get(b"web_store_n\0").map_err(|e| e.to_string())?;
             let f: Symbol<Dirty> = lib.get(b"web_store_take_dirty\0").map_err(|e| e.to_string())?;
-            (*a, *b, *c, *d, *e, *f)
+            let g: Symbol<Fb> = lib.get(b"web_fb\0").map_err(|e| e.to_string())?;
+            let h: Symbol<Leds> = lib.get(b"web_leds\0").map_err(|e| e.to_string())?;
+            let i: Symbol<Btn> = lib.get(b"web_btn\0").map_err(|e| e.to_string())?;
+            let j: Symbol<Enc> = lib.get(b"web_enc\0").map_err(|e| e.to_string())?;
+            (*a, *b, *c, *d, *e, *f, *g, *h, *i, *j)
         };
         #[cfg(not(windows))]
         let _ = fs::remove_file(&chemin); // déjà chargée : le fichier peut disparaître
-        Ok(Self { avance, audio, midi, store, store_n, dirty, lib: Some(lib), chemin })
+        Ok(Self { avance, audio, midi, store, store_n, dirty, fb, leds, btn, enc, lib: Some(lib), chemin })
     }
 
     /// Les réglages et la bibliothèque de patchs du firmware (son bloc `keep`), tels quels.
@@ -70,6 +85,26 @@ impl Noyau {
     /// Vrai si le firmware a écrit ses réglages ou un patch depuis le dernier appel.
     pub fn modifie(&mut self) -> bool {
         unsafe { (self.dirty)() != 0 }
+    }
+
+    /// L'écran du firmware : 240 x 240 pixels en RGB565.
+    pub fn ecran(&self) -> &[u16] {
+        unsafe { std::slice::from_raw_parts((self.fb)(), ECRAN * ECRAN) }
+    }
+
+    /// Les témoins lumineux des 14 boutons (1 = allumé).
+    pub fn temoins(&self) -> [bool; 14] {
+        let l = unsafe { std::slice::from_raw_parts((self.leds)(), 41) };
+        std::array::from_fn(|i| l[i] != 0)
+    }
+
+    pub fn bouton(&mut self, i: u32, bas: bool) {
+        unsafe { (self.btn)(i, bas as u32) }
+    }
+
+    /// Un cran de l'encodeur `id` (0 à 6) ; positif dans le sens horaire.
+    pub fn encodeur(&mut self, id: u32, n: i32) {
+        unsafe { (self.enc)(id, n) }
     }
 
     /// Un message MIDI (état, données 1 et 2), pris en compte au prochain bloc.
@@ -152,6 +187,34 @@ mod tests {
         };
         let (defaut, ferme) = (jouer(None), jouer(Some(10)));
         assert!(defaut > 0.0 && ferme < defaut * 0.8, "défaut {defaut}, fermé {ferme}");
+    }
+
+    /// L'écran n'est pas vide ; `TW_ECRAN=fichier` en garde une copie (RGB565 brut) pour la regarder.
+    #[test]
+    fn ecran_dessine() {
+        let mut n = Noyau::nouveau().unwrap();
+        for _ in 0..150 {
+            n.bloc();
+        }
+        let e = n.ecran();
+        let mut couleurs: Vec<u16> = e.to_vec();
+        couleurs.sort();
+        couleurs.dedup();
+        assert!(couleurs.len() > 4, "écran vide : {} couleurs", couleurs.len());
+        if let Ok(f) = std::env::var("TW_ECRAN") {
+            std::fs::write(f, e.iter().flat_map(|p| p.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+        }
+        // un bouton (ENV) change la page affichée
+        let avant = e.to_vec();
+        n.bouton(4, true);
+        for _ in 0..30 {
+            n.bloc();
+        }
+        n.bouton(4, false);
+        for _ in 0..30 {
+            n.bloc();
+        }
+        assert_ne!(n.ecran(), &avant[..], "l'écran n'a pas changé après ENV");
     }
 
     #[test]

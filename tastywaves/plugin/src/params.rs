@@ -2,7 +2,8 @@
 //! Le sens est unique : un changement de paramètre part en contrôleur MIDI vers le firmware.
 
 use nih_plug::prelude::*;
-use std::sync::RwLock;
+use nih_plug_egui::EguiState;
+use std::sync::{Arc, RwLock};
 
 /// (champ, nom, contrôleur, minimum, maximum, défaut du firmware). Un minimum négatif : valeur envoyée = valeur + 64.
 macro_rules! table {
@@ -10,6 +11,8 @@ macro_rules! table {
         #[derive(Params)]
         pub struct Parametres {
             $( #[id = $nom] pub $champ: IntParam, )*
+            #[persist = "editor-state"]
+            pub fenetre: Arc<EguiState>,
             /// Réglages et patchs du firmware, en hexadécimal ; mis à jour quand le firmware les écrit.
             #[persist = "keep"]
             pub keep: RwLock<String>,
@@ -18,6 +21,7 @@ macro_rules! table {
         impl Default for Parametres {
             fn default() -> Self {
                 Self {
+                    fenetre: EguiState::from_size(520, 800),
                     $( $champ: IntParam::new($nom, $def, IntRange::Linear { min: $min, max: $max }), )*
                     keep: RwLock::new(String::new()),
                 }
