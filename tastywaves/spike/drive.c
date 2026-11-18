@@ -12,6 +12,9 @@ typedef struct {
     void (*advance)(double);
     float *(*audio)(void);
     void (*midi)(uint32_t, uint32_t, uint32_t);
+    void (*enc)(uint32_t, int32_t);
+    void (*btn)(uint32_t, uint32_t);
+    uint16_t *(*fb)(void);
 } Inst;
 
 static Inst load(const char *so, int k)
@@ -25,6 +28,9 @@ static Inst load(const char *so, int k)
     in.advance = (void (*)(double))dlsym(in.h, "tw_advance");
     in.audio = (float *(*)(void))dlsym(in.h, "web_audio");
     in.midi = (void (*)(uint32_t, uint32_t, uint32_t))dlsym(in.h, "web_midi");
+    in.enc = (void (*)(uint32_t, int32_t))dlsym(in.h, "web_enc");
+    in.btn = (void (*)(uint32_t, uint32_t))dlsym(in.h, "web_btn");
+    in.fb = (uint16_t *(*)(void))dlsym(in.h, "web_fb");
     return in;
 }
 
@@ -42,6 +48,11 @@ int main(int argc, char **argv)
                 in[k].midi(0x90, (uint32_t)atoi(argv[2 + k]), 100);
                 if (getenv("ACCORD")) for (int j = 1; j < 12; j++) in[k].midi(0x90, (uint32_t)atoi(argv[2 + k]) + 2u * j, 100);   /* 12 voix */
             }
+            if (getenv("SCENE")) {                  /* des encodeurs et un bouton, comme ref.mjs */
+                if (b == boot + 50) { in[k].enc(0, 3); in[k].enc(1, -2); }
+                if (b == boot + 60) in[k].btn(2, 1);
+                if (b == boot + 70) in[k].btn(2, 0);
+            }
             in[k].advance(256.0 * 1000.0 / 44100.0);
             const float *o = in[k].audio();
             for (int i = 0; i < 512; i++) {
@@ -51,6 +62,11 @@ int main(int argc, char **argv)
                 if (b >= boot) fwrite(&s, 2, 1, wav[k]);
             }
         }
+    }
+    for (k = 0; k < n; k++) {                      /* somme de l'écran */
+        uint64_t f = 0; const uint16_t *px = in[k].fb();
+        for (int i = 0; i < 240 * 240; i++) f = f * 1099511628211ull + px[i];
+        printf("instance %d écran %016llx\n", k, (unsigned long long)f);
     }
     for (k = 0; k < n; k++) printf("instance %d note %s : somme %016llx crête %.3f\n", k, argv[2 + k], (unsigned long long)sum[k], peak[k]);
     return 0;

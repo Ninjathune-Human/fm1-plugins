@@ -1,0 +1,22 @@
+name: Banc
+
+on:
+  push:
+    paths: ['tastywaves/**', '.github/workflows/banc.yml']
+  workflow_dispatch:
+
+jobs:
+  comparer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: wasm-opt
+        run: npm install --prefix "$RUNNER_TEMP/wo" wasm-opt && echo "$RUNNER_TEMP/wo/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Natif contre WebAssembly
+        run: tastywaves/banc/construire.sh
