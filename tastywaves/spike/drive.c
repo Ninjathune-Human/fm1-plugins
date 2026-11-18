@@ -1,7 +1,15 @@
 /* Essai de faisabilité : charge N copies du noyau (une par instance), joue une note sur chacune, écrit un WAV par
- * instance et affiche une somme de contrôle. gcc drive.c -ldl -o drive ; ./drive noyau.so note1 [note2 ...] */
+ * instance et affiche une somme de contrôle. gcc drive.c -ldl -o drive (Linux ; sous Windows : gcc drive.c -o drive) ; ./drive noyau.so note1 [note2 ...] */
 #define _GNU_SOURCE
+#ifdef _WIN32
+#include <windows.h>
+#define OUVRIR(p) ((void *)LoadLibraryA(p))
+#define SYM(h, n) ((void *)GetProcAddress((HMODULE)(h), n))
+#else
 #include <dlfcn.h>
+#define OUVRIR(p) dlopen(p, RTLD_NOW | RTLD_LOCAL)
+#define SYM(h, n) dlsym(h, n)
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,20 +25,34 @@ typedef struct {
     uint16_t *(*fb)(void);
 } Inst;
 
+static const char *tmpdir(void)
+{
+    const char *t = getenv("TMPDIR"); if (!t) t = getenv("TEMP"); return t ? t : "/tmp";
+}
+static int copier(const char *de, const char *vers)
+{
+    FILE *a = fopen(de, "rb"), *b = fopen(vers, "wb"); char buf[65536]; size_t n;
+    if (!a || !b) return 1;
+    while ((n = fread(buf, 1, sizeof buf, a)) > 0) fwrite(buf, 1, n, b);
+    fclose(a); fclose(b); return 0;
+}
 static Inst load(const char *so, int k)
 {
-    char tmp[256]; char cmd[600]; Inst in;
-    snprintf(tmp, sizeof tmp, "/tmp/tw_inst_%d.so", k);
-    snprintf(cmd, sizeof cmd, "cp '%s' '%s'", so, tmp);
-    if (system(cmd)) exit(2);
-    in.h = dlopen(tmp, RTLD_NOW | RTLD_LOCAL);
-    if (!in.h) { fprintf(stderr, "%s\n", dlerror()); exit(2); }
-    in.advance = (void (*)(double))dlsym(in.h, "tw_advance");
-    in.audio = (float *(*)(void))dlsym(in.h, "web_audio");
-    in.midi = (void (*)(uint32_t, uint32_t, uint32_t))dlsym(in.h, "web_midi");
-    in.enc = (void (*)(uint32_t, int32_t))dlsym(in.h, "web_enc");
-    in.btn = (void (*)(uint32_t, uint32_t))dlsym(in.h, "web_btn");
-    in.fb = (uint16_t *(*)(void))dlsym(in.h, "web_fb");
+    char tmp[512]; Inst in;
+#ifdef _WIN32
+    snprintf(tmp, sizeof tmp, "%s\\tw_inst_%d.dll", tmpdir(), k);
+#else
+    snprintf(tmp, sizeof tmp, "%s/tw_inst_%d.so", tmpdir(), k);
+#endif
+    if (copier(so, tmp)) { fprintf(stderr, "copie impossible\n"); exit(2); }
+    in.h = OUVRIR(tmp);
+    if (!in.h) { fprintf(stderr, "chargement impossible\n"); exit(2); }
+    in.advance = (void (*)(double))SYM(in.h, "tw_advance");
+    in.audio = (float *(*)(void))SYM(in.h, "web_audio");
+    in.midi = (void (*)(uint32_t, uint32_t, uint32_t))SYM(in.h, "web_midi");
+    in.enc = (void (*)(uint32_t, int32_t))SYM(in.h, "web_enc");
+    in.btn = (void (*)(uint32_t, uint32_t))SYM(in.h, "web_btn");
+    in.fb = (uint16_t *(*)(void))SYM(in.h, "web_fb");
     return in;
 }
 
@@ -40,7 +62,7 @@ int main(int argc, char **argv)
     Inst in[8]; FILE *wav[8]; uint64_t sum[8] = {0}; double peak[8] = {0};
     for (k = 0; k < n; k++) {
         char name[64]; in[k] = load(argv[1], k);
-        snprintf(name, sizeof name, "/tmp/tw_%d.raw", k); wav[k] = fopen(name, "wb");
+        snprintf(name, sizeof name, "%s/tw_%d.raw", tmpdir(), k); wav[k] = fopen(name, "wb");
     }
     for (b = 0; b < boot + blocks; b++) {
         for (k = 0; k < n; k++) {
