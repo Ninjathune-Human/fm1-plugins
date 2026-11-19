@@ -32,12 +32,12 @@ jobs:
           curl -sSLo pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
           unzip -qo pv.zip && chmod +x pluginval
           xvfb-run -a ./pluginval --strictness-level 5 --validate-in-process --skip-gui-tests target/bundled/tastywaves.vst3
-      - name: pluginval niveau 5 (Windows, interface comprise)
+      - name: "pluginval niveau 5 (Windows, sans les tests d interface, pas de pilote OpenGL sur le runner)"
         if: runner.os == 'Windows'
         run: |
           curl -sSLo pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip
           unzip -qo pv.zip
-          ./pluginval.exe --strictness-level 5 --validate-in-process target/bundled/tastywaves.vst3
+          ./pluginval.exe --strictness-level 5 --validate-in-process --skip-gui-tests target/bundled/tastywaves.vst3
       - uses: actions/upload-artifact@v4
         with:
           name: tastywaves-${{ matrix.os }}
