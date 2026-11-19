@@ -26,7 +26,7 @@ jobs:
         run: cargo test -p tastywaves --release
       - name: Paquets VST3 et CLAP
         run: cargo xtask bundle tastywaves --release
-      - name: pluginval niveau 5 (Linux, sans les tests d'interface : l'écran virtuel plante dans pluginval lui-même)
+      - name: "pluginval niveau 5 (Linux, sans les tests d'interface, l'écran virtuel plante dans pluginval lui-même)"
         if: runner.os == 'Linux'
         run: |
           curl -sSLo pv.zip https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Linux.zip
